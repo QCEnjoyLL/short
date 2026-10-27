@@ -2,15 +2,15 @@
   "name": "short",
   "version": "1.0.0",
   "description": "A URL Shortener created using Cloudflare Pages",
-  "main": "index.js",
-  "dependencies": {
-    "wrangler": "^3.5.1"
-  },
-  "devDependencies": {},
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "devDependencies": { "wrangler": "^4.153.0" },
   "scripts": {
-    "dev": "wrangler pages dev . --d1=short",
-    "clear": "kill -9 $(pgrep workerd)",
-    "d1": "wrangler d1 execute short --local --file=./short.sql"
+    "build": "node scripts/build.mjs",
+    "dev": "npm run build && wrangler pages dev dist --d1 DB=short --compatibility-date=2026-10-27",
+    "test": "node --import ./tests/register-html.js --test tests/*.test.js",
+    "check": "npm test && npm run build && wrangler pages functions build --outdir .wrangler/functions",
+    "d1": "wrangler d1 execute short --local --config wrangler.local.jsonc --file=./short.sql"
   },
   "repository": {
     "type": "git",

@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "short",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-10-27",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "short",
+      // Placeholder for local emulation only. Production uses the Pages dashboard binding.
+      "database_id": "short"
+    }
+  ]
+}

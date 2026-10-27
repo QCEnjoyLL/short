@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" href="asset/img/favicon.png"  >
@@ -128,7 +128,7 @@
         line-height: inherit;
         cursor: pointer;
         user-select: none;
-        transition: border .3s, background .3s,;
+        transition: border .3s, background .3s;
       }
 
       button:hover {
@@ -200,21 +200,31 @@
           transform: rotate(360deg);
         }
       }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
     </style>
   </head>
   <body>
     <header><h1>short</h1></header>
     <main x-data="app" x-cloak>
-      <p x-show.transition.opacity="alert" :class="alert?.type" x-text="alert?.message"></p>
-      <input placeholder="输入要缩短的网址..." x-model="url" x-ref="url" />
-      <details>
+      <p role="status" aria-live="polite" x-show.transition.opacity="alert" :class="alert?.type" x-text="alert?.message"></p>
+      <input aria-label="要缩短的网址" placeholder="输入要缩短的网址..." x-model="url" x-ref="url" maxlength="8192" @keydown.enter.prevent="submit($refs, $nextTick)" />
+      <details x-ref="settings">
         <summary>自定义设置</summary>
         <div>
-          <input placeholder="slug" x-model="slug" />
-          <small>Slug 默认是随机生成的短 id。</small>
+          <input aria-label="自定义短链后缀" placeholder="slug（可选）" x-model="slug" maxlength="32" @keydown.enter.prevent="submit($refs, $nextTick)" />
+          <small>默认随机生成；自定义支持 2–32 位字母、数字、下划线和短横线。</small>
+          <input aria-label="创建密码" placeholder="创建密码" type="password" autocomplete="current-password" x-model="token" x-ref="token" maxlength="1024" @keydown.enter.prevent="submit($refs, $nextTick)" />
+          <small>仅创建需要密码，访问短链不需要。密码不保存到浏览器存储。</small>
         </div>
       </details>
-      <button :class="{ loading }" :disabled="loading || isValidated()" @click="submit($refs, $nextTick)">生成</button>
+      <p x-show="result"><input aria-label="生成的短链接，点击选中" :value="result" x-ref="result" readonly @click="$el.select()" /></p>
+      <button type="button" :class="{ loading }" :disabled="loading || isValidated()" @click="submit($refs, $nextTick)">生成</button>
     </main>
     <footer>
      service
@@ -224,52 +234,83 @@
       const app = {
         url: '',
         slug: '',
+        token: '',
+        result: '',
         alert: null,
         loading: false,
         isValidated () {
-          return !/^https?:\/\/.{3,}/.test(this.url)
+          try {
+            const target = new URL(this.url.trim())
+            return !['http:', 'https:'].includes(target.protocol) || !target.hostname || !!target.username || !!target.password
+          } catch {
+            return true
+          }
         },
-        submit ($refs, $nextTick) {
-          if (!this.url) {
-            this.alert = { type: 'error', message: '缺少必需的参数：url。' }
+        async submit ($refs, $nextTick) {
+          if (this.loading) return
+          if (this.isValidated()) {
+            this.alert = { type: 'error', message: '请输入有效的 HTTP(S) 网址。' }
             return
           }
-
-          if (this.isValidated()) {
-            this.alert = { type: 'error', message: '非法格式：url。' }
+          if (!this.token) {
+            $refs.settings.open = true
+            $refs.token.focus()
+            this.alert = { type: 'error', message: '请在自定义设置中输入创建密码。' }
             return
           }
 
           this.alert = null
+          this.result = ''
           this.loading = true
 
-          const body = { url: this.url }
-          if (this.slug) body.slug = this.slug
+          const body = { url: this.url.trim() }
+          if (this.slug.trim()) body.slug = this.slug.trim()
 
-          fetch('/create', {
-            method: 'post',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(body)
-          })
-            .then(res => res.json())
-            .then(res => {
-              this.loading = false
-              if (res.message) {
-                this.alert = { type: 'error', message: res.message }
-                return
+          try {
+            const response = await fetch('/create', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` },
+              body: JSON.stringify(body)
+            })
+            const data = await response.json()
+            if (!response.ok || data.message) {
+              const messages = {
+                400: '网址或自定义后缀不合法，请检查；不能缩短本站网址。',
+                401: '创建密码不正确，请重新输入。',
+                403: '不允许从其他网站创建短链接。',
+                409: '这个短链后缀已经被使用，请换一个。',
+                413: '提交内容过长，请缩短后重试。',
+                503: '服务暂不可用，请检查 CREATE_TOKEN、数据库绑定及表结构。'
               }
-
-              this.url = res.link
-
-              $nextTick(() => {
-                $refs.url.select()
-                this.alert = { type: 'success', message: `链接 ${document.execCommand('Copy') ? '复制' : '生成'} ` }
-              })
-            })
-            .catch(e => {
-              this.alert = { type: 'error', message: e.message }
-              this.loading = false
-            })
+              if (response.status === 401) {
+                $refs.settings.open = true
+                $refs.token.focus()
+              }
+              throw new Error(messages[response.status] || '生成失败，请稍后重试。')
+            }
+            if (typeof data.link !== 'string' || !data.link.startsWith(`${location.origin}/`)) {
+              throw new Error('服务返回了无效的短链接。')
+            }
+            this.result = data.link
+            await new Promise(resolve => $nextTick(resolve))
+            $refs.result.select()
+            let copied = false
+            try {
+              if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(data.link)
+                copied = true
+              } else {
+                copied = document.execCommand('copy')
+              }
+            } catch {
+              try { copied = document.execCommand('copy') } catch {}
+            }
+            this.alert = { type: 'success', message: copied ? '短链接已生成并复制。' : '短链接已生成，请复制下方链接。' }
+          } catch (error) {
+            this.alert = { type: 'error', message: error instanceof SyntaxError ? '服务响应异常，请稍后重试。' : error.message }
+          } finally {
+            this.loading = false
+          }
         }
       }
     </script>
