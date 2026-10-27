@@ -74,6 +74,66 @@ test('missing, incorrect and oversized passwords are rejected before database ac
     assert.equal(calls.length, 0);
 });
 
+for (const flag of [undefined, null, '', 'false', 'FALSE', 'TRUE', '1', ' true ', false, true, 1]) {
+    test(`PUBLIC_CREATE=${JSON.stringify(flag)} (${typeof flag}) does not disable password protection`, async t => {
+        const { env, calls } = fixture(t);
+        env.PUBLIC_CREATE = flag;
+        const request = () => createRequest(undefined, { headers: { Authorization: '' } });
+        assert.equal((await create({ env, request: request() })).status, 401);
+        delete env.CREATE_TOKEN;
+        assert.equal((await create({ env, request: request() })).status, 503);
+        assert.equal(calls.length, 0);
+    });
+}
+
+test('clients cannot enable public creation through query parameters, headers or JSON', async t => {
+    const { env, calls } = fixture(t);
+    const request = new Request('https://short.test/create?PUBLIC_CREATE=true', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', PUBLIC_CREATE: 'true' },
+        body: JSON.stringify({ url: 'https://example.com', PUBLIC_CREATE: 'true' }),
+    });
+    assert.equal((await create({ env, request })).status, 401);
+    assert.equal(calls.length, 0);
+});
+
+test('explicit public mode allows creation without a configured secret or bearer token', async t => {
+    const { env, sqlite } = fixture(t);
+    env.PUBLIC_CREATE = 'true';
+    delete env.CREATE_TOKEN;
+    const response = await create({ env, request: createRequest(undefined, { headers: { Authorization: '' } }) });
+    assert.equal(response.status, 200);
+    assert.match((await response.json()).slug, /^[A-Za-z0-9]{6}$/);
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM links').get().count, 1);
+});
+
+test('public mode ignores stale passwords but retains origin and input validation', async t => {
+    const { env, calls } = fixture(t);
+    env.PUBLIC_CREATE = 'true';
+    assert.equal((await create({ env, request: createRequest(undefined, { headers: {
+        Authorization: 'Bearer stale-password', Origin: 'https://evil.test',
+    } }) })).status, 403);
+    assert.equal((await create({ env, request: createRequest({ url: 'javascript:alert(1)' }) })).status, 400);
+    assert.equal((await create({ env, request: createRequest(undefined, { method: 'GET' }) })).status, 405);
+    assert.equal(calls.length, 0);
+    assert.equal((await create({ env, request: createRequest(undefined, { headers: { Authorization: 'Bearer stale-password' } }) })).status, 200);
+});
+
+test('switching public mode off restores password protection without changing existing links', async t => {
+    const { env, sqlite } = fixture(t);
+    env.PUBLIC_CREATE = 'true';
+    const anonymousRequest = () => createRequest(undefined, { headers: { Authorization: '' } });
+    const original = await (await create({ env, request: anonymousRequest() })).json();
+    env.PUBLIC_CREATE = 'false';
+    assert.equal((await create({ env, request: anonymousRequest() })).status, 401);
+    assert.equal((await create({ env, request: createRequest(undefined, { headers: { Authorization: 'Bearer wrong' } }) })).status, 401);
+    const authenticated = await create({ env, request: createRequest() });
+    assert.equal(authenticated.status, 200);
+    assert.deepEqual(await authenticated.json(), original);
+    assert.equal((await redirect(visit(env, original.slug))).status, 302);
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM links').get().count, 1);
+});
+
 test('only POST is accepted and CORS is not open to arbitrary sites', async t => {
     const { env, calls } = fixture(t);
     const get = await create({ env, request: createRequest(undefined, { method: 'GET' }) });

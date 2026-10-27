@@ -219,8 +219,8 @@
         <div>
           <input aria-label="自定义短链后缀" placeholder="slug（可选）" x-model="slug" maxlength="32" @keydown.enter.prevent="submit($refs, $nextTick)" />
           <small>默认随机生成；自定义支持 2–32 位字母、数字、下划线和短横线。</small>
-          <input aria-label="创建密码" placeholder="创建密码" type="password" autocomplete="current-password" x-model="token" x-ref="token" maxlength="1024" @keydown.enter.prevent="submit($refs, $nextTick)" />
-          <small>仅创建需要密码，访问短链不需要。密码不保存到浏览器存储。</small>
+          <input aria-label="创建密码" placeholder="创建密码（启用密码时填写）" type="password" autocomplete="current-password" x-model="token" x-ref="token" maxlength="1024" @keydown.enter.prevent="submit($refs, $nextTick)" />
+          <small>公开创建模式可留空；启用密码时填写。访问短链不需要密码，密码不保存到浏览器存储。</small>
         </div>
       </details>
       <p x-show="result"><input aria-label="生成的短链接，点击选中" :value="result" x-ref="result" readonly @click="$el.select()" /></p>
@@ -252,31 +252,26 @@
             this.alert = { type: 'error', message: '请输入有效的 HTTP(S) 网址。' }
             return
           }
-          if (!this.token) {
-            $refs.settings.open = true
-            $refs.token.focus()
-            this.alert = { type: 'error', message: '请在自定义设置中输入创建密码。' }
-            return
-          }
-
           this.alert = null
           this.result = ''
           this.loading = true
 
           const body = { url: this.url.trim() }
           if (this.slug.trim()) body.slug = this.slug.trim()
+          const headers = { 'Content-Type': 'application/json' }
+          if (this.token) headers.Authorization = `Bearer ${this.token}`
 
           try {
             const response = await fetch('/create', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` },
+              headers,
               body: JSON.stringify(body)
             })
             const data = await response.json()
             if (!response.ok || data.message) {
               const messages = {
                 400: '网址或自定义后缀不合法，请检查；不能缩短本站网址。',
-                401: '创建密码不正确，请重新输入。',
+                401: this.token ? '创建密码不正确，请重新输入。' : '本站已启用密码，请在自定义设置中输入创建密码。',
                 403: '不允许从其他网站创建短链接。',
                 409: '这个短链后缀已经被使用，请换一个。',
                 413: '提交内容过长，请缩短后重试。',

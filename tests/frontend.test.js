@@ -29,13 +29,29 @@ function page(options = {}) {
     return { app, refs, calls, nextTick: callback => callback(), focused: () => focused, selected: () => selected };
 }
 
-test('missing password opens settings without making a request', async () => {
-    const { app, refs, calls, nextTick, focused } = page();
+test('password mode prompts on server rejection rather than blocking public creation locally', async () => {
+    const { app, refs, calls, nextTick, focused } = page({
+        response: () => Response.json({ message: 'Invalid creation password.' }, { status: 401 }),
+    });
     await app.submit(refs, nextTick);
     assert.equal(refs.settings.open, true);
     assert.equal(focused(), true);
-    assert.equal(calls.length, 0);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].init.headers.Authorization, undefined);
     assert.equal(app.alert.type, 'error');
+    assert.equal(app.loading, false);
+});
+
+test('public creation succeeds without a password or Authorization header', async () => {
+    const { app, refs, calls, nextTick, focused } = page();
+    await app.submit(refs, nextTick);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].init.headers.Authorization, undefined);
+    assert.equal(app.result, 'https://short.test/abcdef');
+    assert.equal(app.alert.type, 'success');
+    assert.equal(app.loading, false);
+    assert.equal(refs.settings.open, false);
+    assert.equal(focused(), false);
 });
 
 test('generation sends password only as a bearer header and preserves the target URL', async () => {

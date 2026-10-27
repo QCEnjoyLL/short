@@ -1,3 +1,4 @@
 # Copy to .dev.vars and replace this value. Never commit .dev.vars.
 CREATE_TOKEN="replace-with-a-long-random-password"
+PUBLIC_CREATE="false"
 LOG_VISITS="false"

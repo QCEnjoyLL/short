@@ -68,17 +68,20 @@ export async function onRequest({ request, env }) {
     if (request.method !== 'POST') {
         return json({ message: 'Method not allowed.' }, 405, { Allow: 'POST, OPTIONS' });
     }
-    if (typeof env.CREATE_TOKEN !== 'string' || !env.CREATE_TOKEN.trim()) {
-        return json({ message: 'Creation is disabled. Configure the CREATE_TOKEN secret first.' }, 503);
-    }
     const origin = new URL(request.url).origin;
     const requestOrigin = request.headers.get('Origin');
     if (requestOrigin && requestOrigin !== origin) {
         return json({ message: 'Cross-origin creation is not allowed.' }, 403);
     }
-    const supplied = request.headers.get('Authorization')?.match(/^Bearer (.+)$/i)?.[1];
-    if (!supplied || supplied.length > 1024 || !await verifyToken(env.CREATE_TOKEN, supplied)) {
-        return json({ message: 'Invalid creation password.' }, 401, { 'WWW-Authenticate': 'Bearer' });
+    // Public creation is opt-in; missing or mistyped flags keep password protection.
+    if (env.PUBLIC_CREATE !== 'true') {
+        if (typeof env.CREATE_TOKEN !== 'string' || !env.CREATE_TOKEN.trim()) {
+            return json({ message: 'Creation is disabled. Configure the CREATE_TOKEN secret first.' }, 503);
+        }
+        const supplied = request.headers.get('Authorization')?.match(/^Bearer (.+)$/i)?.[1];
+        if (!supplied || supplied.length > 1024 || !await verifyToken(env.CREATE_TOKEN, supplied)) {
+            return json({ message: 'Invalid creation password.' }, 401, { 'WWW-Authenticate': 'Bearer' });
+        }
     }
     if (request.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
         return json({ message: 'Content-Type must be application/json.' }, 415);
